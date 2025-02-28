@@ -4,16 +4,18 @@ import javafx.scene.control.*;
 import javafx.scene.layout.AnchorPane;
 import javafx.stage.FileChooser;
 
+import javax.swing.*;
 import java.io.*;
 import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.StandardOpenOption;
 import java.util.Arrays;
+import java.util.Base64;
+import java.util.HexFormat;
 import java.util.Objects;
 
 public class Controller {
-
 
     @FXML
     private RadioButton bOkno;
@@ -25,59 +27,44 @@ public class Controller {
     private TextArea unencryptedText;
 
     @FXML
-    private TextArea signature;
+    private TextArea encryptedText;
 
     @FXML
     private AnchorPane rootPane;
 
     @FXML
-    private TextField keyP;
-    @FXML
-    private TextField keyH;
-    @FXML
-    private TextField keyQ;
-    @FXML
-    private TextField keyV;
-    @FXML
-    private TextField keyA;
+    private TextField key;
 
-    private BigInteger[] encodedM = new BigInteger[2];
+    private final DES des = new DES();
+    private byte[] encodedM;
     private byte[] unencryptedTextBytes;
 
+    public void generateKey(ActionEvent actionEvent) {
+        key.setText("1D34BA02C0AFE567");
+    }
 
+    // Sprawdza czy tekst jest w formacie HEX i sklada sie z 16 znakow.
+    private boolean testKey(String string) {
+        return string.matches("[0-9A-Fa-f]{16}");
+    }
 
+    // Wczytuje klucz z pliku txt, zapisany w formacie HEX w jednej linii
     public void loadKey(ActionEvent actionEvent) {
         FileChooser fileChooser = new FileChooser();
         FileChooser.ExtensionFilter extensionFilter = new FileChooser.ExtensionFilter("Text Files", "*.txt");
         fileChooser.getExtensionFilters().add(extensionFilter);
-        fileChooser.setTitle("Wybierz plik z kluczem publicznym");
         File selectedFile = fileChooser.showOpenDialog(rootPane.getScene().getWindow());
         try {
-            String[] keyValues = Files.readString(selectedFile.toPath()).split("\n");
-            if (keyValues.length == 4) {
-                keyP.setText(keyValues[0]);
-                keyQ.setText(keyValues[1]);
-                keyH.setText(keyValues[2]);
-                keyV.setText(keyValues[3]);
-            } else {
-                showAlert("Klucz zawarty w pliku jest bledny.", Alert.AlertType.ERROR);
-            }
-
-
-        } catch (IOException e) {
-            showAlert("Nie udalo sie otworzyc pliku.", Alert.AlertType.ERROR);
-        }
-        fileChooser.setTitle("Wybierz plik z kluczem prywatnym");
-        selectedFile = fileChooser.showOpenDialog(rootPane.getScene().getWindow());
-        try {
             String keyValue = Files.readString(selectedFile.toPath());
-            if (true) {     // tbc
-                keyA.setText(keyValue);
+            if (testKey(keyValue)) {
+                key.setText(keyValue);
             } else {
-                showAlert("Klucz zawarty w pliku jest bledny.", Alert.AlertType.ERROR);
+                showAlert("Klucz zawarty w pliku jest bledny. Klucz musi byc zapisany w jednej linii, " +
+                        "w formacie HEX i skladac sie z 16 znakow.");
             }
+
         } catch (IOException e) {
-            showAlert("Nie udalo sie otworzyc pliku.", Alert.AlertType.ERROR);
+            showAlert("Nie udalo sie otworzyc pliku.");
         }
     }
 
@@ -86,36 +73,25 @@ public class Controller {
         FileChooser fileChooser = new FileChooser();
         FileChooser.ExtensionFilter extensionFilter = new FileChooser.ExtensionFilter("Text Files", "*.txt");
         fileChooser.getExtensionFilters().add(extensionFilter);
-        fileChooser.setTitle("Zapisz plik z kluczem publicznym");
         File selectedFile = fileChooser.showSaveDialog(rootPane.getScene().getWindow());
         try {
-            String keyValue = keyP.getText()+"\n"+keyQ.getText()+"\n"+keyH.getText()+"\n"+keyV.getText();
-            if (true) {
+            String keyValue = key.getText();
+            if (testKey(keyValue)) {
                 Files.writeString(selectedFile.toPath(), keyValue, StandardOpenOption.CREATE);
             } else {
-                showAlert("Podany klucz jest bledny.", Alert.AlertType.ERROR);
+                showAlert("Podany klucz jest bledny. Klucz musi byc zapisany w formacie HEX" +
+                        " i skladac sie z 16 znakow.");
             }
+
         } catch (IOException e) {
-            showAlert("Nie udalo sie utworzyc pliku.", Alert.AlertType.ERROR);
-        }
-        fileChooser.setTitle("Zapisz plik z kluczem prywatnym");
-        selectedFile = fileChooser.showSaveDialog(rootPane.getScene().getWindow());
-        try {
-            String keyValue = keyA.getText();
-            if (true) {
-                Files.writeString(selectedFile.toPath(), keyValue, StandardOpenOption.CREATE);
-            } else {
-                showAlert("Podany klucz jest bledny.", Alert.AlertType.ERROR);
-            }
-        } catch (IOException e) {
-            showAlert("Nie udalo sie utworzyc pliku.", Alert.AlertType.ERROR);
+            showAlert("Nie udalo sie utworzyc pliku.");
         }
     }
 
 
     // Wyswietla alert z przekazana trescia
-    private void showAlert(String content, Alert.AlertType alertType) {
-        Alert alert = new Alert(alertType);
+    private void showAlert(String content) {
+        Alert alert = new Alert(Alert.AlertType.ERROR);
         alert.setTitle("Błąd!");
         alert.setContentText(content);
         alert.setHeaderText(null);
@@ -133,6 +109,8 @@ public class Controller {
             fileInputStream.read(data);
             unencryptedTextBytes = data;
             String readText = new String(data, StandardCharsets.UTF_8);
+            System.out.println(unencryptedTextBytes.length);
+            System.out.println("to" + Arrays.toString(unencryptedTextBytes));
             unencryptedText.setText(readText);
         } catch (IOException e) {
             throw new RuntimeException(e);
@@ -158,14 +136,10 @@ public class Controller {
         FileChooser fileChooser = new FileChooser();
         File selectedFile = fileChooser.showSaveDialog(rootPane.getScene().getWindow());
         try (
-                FileWriter fileWriter = new FileWriter(selectedFile);
+                OutputStream fileOutputStream = new FileOutputStream(selectedFile)
         ) {
-            if(encodedM[0].toString() != null) {
-                fileWriter.write(encodedM[0].toString(16)+"\n"+encodedM[1].toString(16));
-            }
-            else {
-                fileWriter.write(signature.getText());
-            }
+            fileOutputStream.write(Objects.requireNonNullElseGet(encodedM,
+                    () -> encryptedText.getText().getBytes()));
 
         } catch (IOException e) {
             throw new RuntimeException(e);
@@ -175,98 +149,49 @@ public class Controller {
     public void loadEncrypted(ActionEvent actionEvent) {
         FileChooser fileChooser = new FileChooser();
         File selectedFile = fileChooser.showOpenDialog(rootPane.getScene().getWindow());
+        try (
+                FileInputStream fileInputStream = new FileInputStream(selectedFile)
+        ) {
+            byte[] data = new byte[fileInputStream.available()];
 
-
-        try {
-            String[] lines = Files.readString(selectedFile.toPath()).split("\n");
-            if (lines.length == 2) {
-                signature.setText(lines[0]+"\n"+lines[1]);
-                encodedM[0] = new BigInteger(lines[0], 16);
-                encodedM[1] = new BigInteger(lines[1], 16);
-            } else {
-                showAlert("Klucz zawarty w pliku jest bledny.", Alert.AlertType.ERROR);
-            }
-
-
+            fileInputStream.read(data);
+            encodedM = data;
+            String readText = new String(data, StandardCharsets.UTF_8);
+            encryptedText.setText(readText);
         } catch (IOException e) {
-            showAlert("Nie udalo sie otworzyc pliku.", Alert.AlertType.ERROR);
+            throw new RuntimeException(e);
         }
     }
 
-    public void sign(ActionEvent actionEvent) {
-        if (!unencryptedText.getText().isEmpty()) {
-            Schnorr schnorr = loadDataToSchnorr();
+    public void encrypt(ActionEvent actionEvent) {
+        if (!unencryptedText.getText().isEmpty() && testKey(key.getText())) {
+            des.byteKey = des.hexBin(key.getText());
             if (bOkno.isSelected()) {
-                encodedM = schnorr.podpisz(unencryptedText.getText().getBytes());
+                encodedM = des.encrypt(unencryptedText.getText().getBytes());
             } else if (bPlik.isSelected()) {
                 if (unencryptedTextBytes != null) {
-                    encodedM = schnorr.podpisz(unencryptedTextBytes);
+                    encodedM = des.encrypt(unencryptedTextBytes);
                 } else {
-                    showAlert("Nie wczytano pliku.", Alert.AlertType.ERROR);
+                    showAlert("Nie wczytano pliku.");
                 }
             }
 
-            signature.setText(encodedM[0].toString(16)+"\n"+encodedM[1].toString(16));
+            encryptedText.setText(des.binHex(encodedM));
         } else {
-            showAlert("Najpierw wprowadz tekst.", Alert.AlertType.ERROR);
+            showAlert("Najpierw wprowadz tekst.");
         }
     }
 
-    public void verify(ActionEvent actionEvent) {
-        if (!signature.getText().isEmpty() && !unencryptedText.getText().isEmpty()) {
-            Schnorr schnorr = loadDataToSchnorr();
-
-            String[] lines = signature.getText().split("\n");
-            System.out.println(lines[0]+"\n"+lines[1]);
-            encodedM[0] = new BigInteger(lines[0], 16);
-            encodedM[1] = new BigInteger(lines[1], 16);
-            if (bOkno.isSelected()) {
-                if(schnorr.weryfikuj(unencryptedText.getText().getBytes(), encodedM) && (lines[0].startsWith("0") || lines[1].startsWith("0"))) {
-                    showAlert("Podpis się nie zgadza", Alert.AlertType.INFORMATION);
-                }   else if (schnorr.weryfikuj(unencryptedText.getText().getBytes(), encodedM)) {
-                    showAlert("Podpis się zgadza", Alert.AlertType.INFORMATION);
-                }
-                else {
-                    showAlert("Podpis się nie zgadza", Alert.AlertType.INFORMATION);
-                }
-            } else if (bPlik.isSelected()) {
-                if (unencryptedTextBytes != null) {
-                    if(schnorr.weryfikuj(unencryptedTextBytes, encodedM) && (lines[0].startsWith("0") || lines[1].startsWith("0"))) {
-                        showAlert("Podpis się nie zgadza", Alert.AlertType.INFORMATION);
-                    } else if (schnorr.weryfikuj(unencryptedTextBytes, encodedM)) {
-                        showAlert("Podpis się zgadza", Alert.AlertType.INFORMATION);
-                    } else {
-                        showAlert("Podpis się nie zgadza", Alert.AlertType.INFORMATION);
-                    }
-                } else {
-                    showAlert("Nie wczytano pliku.", Alert.AlertType.ERROR);
-                }
-            }
+    public void decrypt(ActionEvent actionEvent) {
+        if (!encryptedText.getText().isEmpty() && testKey(key.getText())) {
+            des.byteKey = des.hexBin(key.getText());
+            byte[] decoded = des.decrypt(encodedM);
+            System.out.println("to" + Arrays.toString(decoded));
+            System.out.println(decoded.length);
+            unencryptedTextBytes = decoded;
+            unencryptedText.setText(new String(decoded));
         } else {
-            showAlert("Najpierw wprowadz tekst.", Alert.AlertType.ERROR);
+            showAlert("Najpierw wprowadz tekst.");
         }
-    }
-
-    private Schnorr loadDataToSchnorr() {
-        Schnorr schnorr = new Schnorr();
-        schnorr.p = new BigInteger(keyP.getText(), 16);
-        schnorr.q = new BigInteger(keyQ.getText(), 16);
-        schnorr.h = new BigInteger(keyH.getText(), 16);
-        schnorr.v = new BigInteger(keyV.getText(), 16);
-        if (keyA.getLength() != 0){
-            schnorr.a = new BigInteger(keyA.getText(), 16);
-        }
-
-        return schnorr;
-    }
-
-    public void generateKey(ActionEvent actionEvent) {
-        Schnorr schnorr = new Schnorr();
-        schnorr.generateKey();
-        keyP.setText(schnorr.p.toString(16));
-        keyH.setText(schnorr.h.toString(16));
-        keyQ.setText(schnorr.q.toString(16));
-        keyV.setText(schnorr.v.toString(16));
-        keyA.setText(schnorr.a.toString(16));
     }
 }
